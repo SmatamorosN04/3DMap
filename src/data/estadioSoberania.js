@@ -1,13 +1,8 @@
 /**
  * Gemelo Digital 1:1 - Estadio Nacional Soberanía (Managua, Nicaragua)
  * Escala: 1 unidad = 1 metro
- * Orientación real:
- *  - Home Plate: (0, 0, 42)
- *  - Montículo Pitcher: (0, 0.28, 23.56)
- *  - 1ra Base (Derecha): (+19.4, 0, 22.6)
- *  - 3ra Base (Izquierda): (-19.4, 0, 22.6)
- *  - Jardín Central (-Z): (0, 0, -80) -> Distancia Home-Center = 122m (400 ft)
- *  - Gradería Principal (+Z): detrás de Home Plate hacia Z = +85m
+ * Pendientes y alturas calibradas para vista libre hacia Home Plate y el Diamante
+ * desde cualquier butaca de Nivel Inferior, Palcos y Gradería Alta.
  */
 
 export const SOBERANIA_DIMENSIONS = {
@@ -15,7 +10,7 @@ export const SOBERANIA_DIMENSIONS = {
   moundZ: 23.56,
   secondBaseZ: 3.2,
   fenceCenterRadius: 122,
-  foulPoleDist: 100.5 // ~330 pies por las rayas de foul
+  foulPoleDist: 100.5
 };
 
 export const SOBERANIA_EVENTS = {
@@ -73,7 +68,6 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     blocked = false
   }) => {
     const rowLabel = rowIndexToLabel(rowIdx);
-    // Cada butaca apunta directamente hacia el montículo/diamante (o tarima en concierto)
     const yaw = Math.atan2(lookTarget.x - x, lookTarget.z - z);
 
     seats.push({
@@ -97,10 +91,8 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
   };
 
   /**
-   * Herradura real detrás de Home Plate:
-   * theta = 0 -> directamente detrás de Home Plate (+Z)
-   * theta < 0 -> gira hacia 3ra Base (-X)
-   * theta > 0 -> gira hacia 1ra Base (+X)
+   * Herradura detrás de Home Plate con escalones segmentados siguiendo la curvatura
+   * para evitar cualquier corte recto que invada la vista de las sillas.
    */
   const buildRearHorseshoeSection = ({
     sectorId,
@@ -126,20 +118,24 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
       const arcLength = radius * arcSpan;
       const cols = Math.max(4, Math.floor(arcLength / 0.58));
 
-      // Escalón de concreto bajo la fila
-      const midTheta = (thetaStart + thetaEnd) / 2;
-      const bx = Math.sin(midTheta) * radius;
-      const bz = homeZ + Math.cos(midTheta) * radius;
-      tierBlocks.push({
-        x: bx,
-        y: Math.max(0.2, y - 0.18),
-        z: bz,
-        w: arcLength + 0.55,
-        h: 0.42,
-        d: rowTread + 0.08,
-        rotY: midTheta,
-        color: level === 2 ? '#0f172a' : '#1e293b'
-      });
+      // Subdividir el escalón curvo en 3 tramos cortos para seguir fielmente el arco
+      const arcSubSegs = 3;
+      for (let seg = 0; seg < arcSubSegs; seg++) {
+        const sTheta0 = thetaStart + (seg / arcSubSegs) * (thetaEnd - thetaStart);
+        const sTheta1 = thetaStart + ((seg + 1) / arcSubSegs) * (thetaEnd - thetaStart);
+        const midTheta = (sTheta0 + sTheta1) / 2;
+        const subWidth = (arcLength / arcSubSegs) + 0.15;
+
+        tierBlocks.push({
+          x: Math.sin(midTheta) * radius,
+          y: Math.max(0.18, y - 0.22),
+          z: homeZ + Math.cos(midTheta) * radius,
+          w: subWidth,
+          h: 0.4,
+          d: rowTread + 0.04,
+          rotY: midTheta
+        });
+      }
 
       for (let c = 0; c < cols; c++) {
         const t = cols === 1 ? 0.5 : c / (cols - 1);
@@ -165,15 +161,14 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
   };
 
   /**
-   * Alas laterales rectas a lo largo de las líneas de foul de 1ra Base (+1) y 3ra Base (-1)
-   * Avanzan hacia el jardín (-Z) manteniendo distancia paralela a la raya de 45°
+   * Alas laterales rectas a lo largo de 1ra Base (+1) y 3ra Base (-1)
    */
   const buildFoulLineGrandstand = ({
     sectorId,
     sectorName,
     level,
     tierLabel,
-    sideSign, // -1 = 3ra Base (Izquierda), +1 = 1ra Base (Derecha)
+    sideSign,
     alongStart,
     alongEnd,
     lateralStart,
@@ -187,11 +182,8 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     const span = alongEnd - alongStart;
     const cols = Math.max(6, Math.floor(span / 0.6));
 
-    // Vector unitario a lo largo de la línea de foul (45° hacia el jardín)
     const dirAlongX = sideSign * Math.SQRT1_2;
     const dirAlongZ = -Math.SQRT1_2;
-
-    // Vector unitario perpendicular hacia afuera del terreno (hacia las gradas)
     const dirOutX = sideSign * Math.SQRT1_2;
     const dirOutZ = Math.SQRT1_2;
 
@@ -199,19 +191,17 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
       const lat = lateralStart + r * rowTread;
       const y = yStart + r * rowRise;
 
-      // Bloque de concreto del ala
       const midAlong = (alongStart + alongEnd) / 2;
       const bx = dirAlongX * midAlong + dirOutX * lat;
       const bz = homeZ + dirAlongZ * midAlong + dirOutZ * lat;
       tierBlocks.push({
         x: bx,
-        y: Math.max(0.2, y - 0.18),
+        y: Math.max(0.18, y - 0.22),
         z: bz,
-        w: span + 0.5,
-        h: 0.42,
-        d: rowTread + 0.08,
-        rotY: sideSign * (Math.PI / 4),
-        color: level === 2 ? '#0f172a' : '#1e293b'
+        w: span + 0.45,
+        h: 0.4,
+        d: rowTread + 0.04,
+        rotY: sideSign * (Math.PI / 4)
       });
 
       for (let c = 0; c < cols; c++) {
@@ -236,9 +226,7 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     }
   };
 
-  // =========================================================================
-  // 1. NIVEL 0: ANILLO INFERIOR (HOME PLATE VIP + 1RA BASE + 3RA BASE)
-  // =========================================================================
+  // 1. NIVEL 0: ANILLO INFERIOR (Pendiente 0.44m por fila para visión limpia sobre filas delanteras)
   const lowerCurvedSectors = [
     { id: '3B-101', name: 'Terreno Dugout 3ra Base', t0: -0.76, t1: -0.46, vip: true, color: '#1d4ed8' },
     { id: '3B-102', name: 'Preferencial Baja 3ra Base', t0: -0.43, t1: -0.19, vip: true, color: '#1e40af' },
@@ -256,16 +244,15 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
       thetaStart: sec.t0,
       thetaEnd: sec.t1,
       radiusStart: 13.8,
-      rows: 17,
+      rows: 16,
       rowTread: 0.85,
-      yStart: 0.55,
-      rowRise: 0.34,
+      yStart: 0.65,
+      rowRise: 0.44,
       baseColor: sec.color,
       isVip: sec.vip
     });
   });
 
-  // Alas laterales bajas hasta los postes de foul (3B y 1B)
   buildFoulLineGrandstand({
     sectorId: 'LF-106',
     sectorName: 'Lateral Baja Jardín Izquierdo (3B)',
@@ -275,10 +262,10 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     alongStart: 21,
     alongEnd: 68,
     lateralStart: 13.8,
-    rows: 16,
+    rows: 15,
     rowTread: 0.85,
-    yStart: 0.55,
-    rowRise: 0.34,
+    yStart: 0.65,
+    rowRise: 0.44,
     baseColor: '#2563eb'
   });
 
@@ -291,16 +278,14 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     alongStart: 21,
     alongEnd: 66,
     lateralStart: 13.8,
-    rows: 16,
+    rows: 15,
     rowTread: 0.85,
-    yStart: 0.55,
-    rowRise: 0.34,
+    yStart: 0.65,
+    rowRise: 0.44,
     baseColor: '#2563eb'
   });
 
-  // =========================================================================
-  // 2. NIVEL 1.5: MEZZANINE / PALCOS VIP & CABINA DE PRENSA
-  // =========================================================================
+  // 2. NIVEL 1.5: MEZZANINE / PALCOS VIP (Elevados a y = 8.8m, 100% libres sobre el anillo inferior)
   const palcoSectors = [
     { id: 'PALCO-3B', name: 'Palcos VIP 3ra Base', t0: -0.72, t1: -0.22 },
     { id: 'PALCO-HP', name: 'Palcos Presidenciales Home Plate', t0: -0.19, t1: 0.19 },
@@ -315,19 +300,17 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
       tierLabel: 'Palcos & Mezzanine',
       thetaStart: sec.t0,
       thetaEnd: sec.t1,
-      radiusStart: 29.2,
+      radiusStart: 28.8,
       rows: 3,
       rowTread: 0.88,
-      yStart: 7.2,
-      rowRise: 0.42,
+      yStart: 8.85,
+      rowRise: 0.48,
       baseColor: '#6366f1',
       isVip: true
     });
   });
 
-  // =========================================================================
-  // 3. NIVEL 2: GRADERÍA PREFERENCIAL ALTA (HERRADURA + ALAS LATERALES)
-  // =========================================================================
+  // 3. NIVEL 2: GRADERÍA PREFERENCIAL ALTA (Inicia en y = 11.4m para vista panorámica total)
   const upperCurvedSectors = [
     { id: 'SUP-201', name: 'Grada Alta 3ra Base', t0: -0.76, t1: -0.44 },
     { id: 'SUP-202', name: 'Grada Alta Home Izquierda', t0: -0.41, t1: -0.16 },
@@ -344,16 +327,15 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
       tierLabel: 'Gradería Alta',
       thetaStart: sec.t0,
       thetaEnd: sec.t1,
-      radiusStart: 32.5,
-      rows: 17,
-      rowTread: 0.85,
-      yStart: 9.5,
-      rowRise: 0.56,
+      radiusStart: 32.4,
+      rows: 16,
+      rowTread: 0.86,
+      yStart: 11.4,
+      rowRise: 0.58,
       baseColor: '#3b82f6'
     });
   });
 
-  // Ala Alta Jardín Izquierdo (en la foto aérea es más extensa y escalonada hacia LF)
   buildFoulLineGrandstand({
     sectorId: 'SUP-LF-206',
     sectorName: 'Grada Alta Jardín Izquierdo (Escalonada)',
@@ -362,15 +344,14 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     sideSign: -1,
     alongStart: 22,
     alongEnd: 74,
-    lateralStart: 28.5,
+    lateralStart: 28.4,
     rows: 15,
-    rowTread: 0.85,
-    yStart: 8.6,
-    rowRise: 0.54,
+    rowTread: 0.86,
+    yStart: 9.8,
+    rowRise: 0.56,
     baseColor: '#60a5fa'
   });
 
-  // Ala Alta Jardín Derecho (llega hasta el poste de foul de RF)
   buildFoulLineGrandstand({
     sectorId: 'SUP-RF-207',
     sectorName: 'Grada Alta Jardín Derecho',
@@ -379,17 +360,15 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     sideSign: 1,
     alongStart: 22,
     alongEnd: 65,
-    lateralStart: 28.5,
+    lateralStart: 28.4,
     rows: 15,
-    rowTread: 0.85,
-    yStart: 8.6,
-    rowRise: 0.54,
+    rowTread: 0.86,
+    yStart: 9.8,
+    rowRise: 0.56,
     baseColor: '#60a5fa'
   });
 
-  // =========================================================================
-  // 4. MODO CONCIERTO: ZONA GRAMA VIP FRENTE A TARIMA EN JARDÍN CENTRAL
-  // =========================================================================
+  // 4. MODO CONCIERTO: ZONA GRAMA VIP
   if (isConcert) {
     for (let r = 0; r < 16; r++) {
       const z = -30 + r * 1.15;
@@ -412,7 +391,6 @@ export function buildEstadioSoberaniaModel(eventType = 'baseball') {
     }
   }
 
-  // Agrupar sectores únicos
   const sectorsMap = new Map();
   for (const s of seats) {
     if (!sectorsMap.has(s.sectorId)) {

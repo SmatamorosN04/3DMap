@@ -1,18 +1,14 @@
 /**
  * Gemelo Digital Paramétrico - Polideportivo Alexis Argüello (Managua, Nicaragua)
  * Escala: 1 unidad = 1 metro
- * Capacidad generada: ~8,100 butacas reales distribuidas en:
- *  - Nivel 0: VIP Courtside / Ringside
- *  - Nivel 1: Anillo Inferior (Platea Norte, Sur, Este, Oeste + 4 Esquinas)
- *  - Nivel Intermedio: Cinturón LED 360° + Palcos VIP / Prensa
- *  - Nivel 2: Anillo Superior (Gradería Alta Norte, Sur, Este, Oeste + Esquinas)
+ * Calibrado con convergencia natural de butacas y escalonado limpio sin obstrucciones.
  */
 
 export const ARENA_DIMENSIONS = {
-  outerWidth: 88,   // Eje X (Este - Oeste) en metros
-  outerDepth: 78,   // Eje Z (Norte - Sur) en metros
-  wallHeight: 23.5, // Altura muros perimetrales
-  roofHeight: 22.2  // Altura estructura metálica del techo
+  outerWidth: 88,
+  outerDepth: 78,
+  wallHeight: 24.5,
+  roofHeight: 23.2
 };
 
 export const EVENT_CONFIGS = {
@@ -20,21 +16,21 @@ export const EVENT_CONFIGS = {
     id: 'basketball',
     name: 'Baloncesto FIBA / Selección Nacional',
     focalTitle: 'Duela FIBA • 28m × 15m',
-    focalTarget: { x: 0, y: 1.1, z: 0 },
+    focalTarget: { x: 0, y: 1.35, z: 0 },
     wallColor: '#0c1526'
   },
   boxing: {
     id: 'boxing',
     name: 'Velada de Boxeo / MMA Internacional',
     focalTitle: 'Ring Central • Campeonatos Mundiales',
-    focalTarget: { x: 0, y: 1.8, z: 0 },
+    focalTarget: { x: 0, y: 1.85, z: 0 },
     wallColor: '#140c1c'
   },
   concert: {
     id: 'concert',
     name: 'Concierto / Show Escenario Oeste',
     focalTitle: 'Escenario Principal • Producción 180°',
-    focalTarget: { x: -21, y: 2.6, z: 0 },
+    focalTarget: { x: -15, y: 3.2, z: 0 },
     wallColor: '#090d16'
   }
 };
@@ -46,17 +42,21 @@ function rowIndexToLabel(idx) {
   return `${first}${second}`;
 }
 
-/**
- * Construye el catálogo maestro de asientos y bloques estructurales (gradas de concreto)
- * para el Polideportivo Alexis Argüello según el tipo de evento.
- */
+function blendAngles(targetAngle, sectionNormalAngle, targetWeight = 0.65) {
+  const normalWeight = 1 - targetWeight;
+  const x = Math.cos(targetAngle) * targetWeight + Math.cos(sectionNormalAngle) * normalWeight;
+  const y = Math.sin(targetAngle) * targetWeight + Math.sin(sectionNormalAngle) * normalWeight;
+  return Math.atan2(y, x);
+}
+
 export function buildPolideportivoModel(eventType = 'basketball') {
   const seats = [];
-  const tierBlocks = []; // Geometría de concreto/plataformas bajo las sillas
-  const vomitories = []; // Túneles de acceso en graderías
+  const tierBlocks = [];
+  const vomitories = [];
 
   const isConcert = eventType === 'concert';
   const isBoxing = eventType === 'boxing';
+  const focal = EVENT_CONFIGS[eventType]?.focalTarget || { x: 0, y: 1.35, z: 0 };
 
   const registerSeat = ({
     sectorId,
@@ -68,13 +68,14 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     x,
     y,
     z,
-    yaw,
+    sectionYaw,
     baseColor,
     isVip = false
   }) => {
     const rowLabel = rowIndexToLabel(rowIdx);
-    // En conciertos con escenario en el extremo Oeste (x < -19), bloquear visibilidad trasera
     const blockedByStage = isConcert && x < -19.5;
+    const toTargetYaw = Math.atan2(focal.x - x, focal.z - z);
+    const yaw = blendAngles(toTargetYaw, sectionYaw, 0.65);
 
     seats.push({
       id: `${sectorId}-${rowLabel}-${seatNum}`,
@@ -96,14 +97,11 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     });
   };
 
-  // =========================================================================
-  // 1. NIVEL 0: VIP COURTSIDE / RINGSIDE (A nivel de cancha)
-  // =========================================================================
-  const addCourtsideStrip = (sectorId, sectorName, fixedCoord, axis, count, span, yaw, color) => {
+  // 1. NIVEL 0: VIP COURTSIDE / RINGSIDE
+  const addCourtsideStrip = (sectorId, sectorName, fixedCoord, axis, count, span, sectionYaw, color) => {
     const step = span / count;
     const start = -span / 2 + step / 2;
     for (let i = 0; i < count; i++) {
-      // Dejar pasillo central para mesa técnica / accesos
       if (Math.abs(i - count / 2) < 1.2) continue;
       const offset = start + i * step;
       registerSeat({
@@ -116,23 +114,20 @@ export function buildPolideportivoModel(eventType = 'basketball') {
         x: axis === 'x' ? offset : fixedCoord,
         y: 0.04,
         z: axis === 'z' ? offset : fixedCoord,
-        yaw,
+        sectionYaw,
         baseColor: color,
         isVip: true
       });
     }
   };
 
-  // Laterales Norte y Sur a pie de duela
   addCourtsideStrip('VIP-N', 'Courtside VIP Norte', -10.8, 'x', 42, 30, 0, '#0ea5e9');
   addCourtsideStrip('VIP-S', 'Courtside VIP Sur', 10.8, 'x', 42, 30, Math.PI, '#0ea5e9');
-  // Cabecera Este (y Oeste si no hay escenario de concierto)
   addCourtsideStrip('VIP-E', 'Courtside VIP Este', 17.6, 'z', 20, 14.5, -Math.PI / 2, '#0ea5e9');
   if (!isConcert) {
     addCourtsideStrip('VIP-O', 'Courtside VIP Oeste', -17.6, 'z', 20, 14.5, Math.PI / 2, '#0ea5e9');
   }
 
-  // Si es Boxeo, añadir 4 bloques Ringside alrededor del cuadrilátero
   if (isBoxing) {
     const ringSides = [
       { id: 'RING-N', name: 'Ringside Norte', x: 0, z: -6.2, yaw: 0, axis: 'x' },
@@ -142,7 +137,7 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     ];
     ringSides.forEach((side) => {
       for (let r = 0; r < 4; r++) {
-        const dist = 5.4 + r * 0.85;
+        const dist = 5.4 + r * 0.88;
         for (let c = 0; c < 12; c++) {
           const offset = -4.6 + c * 0.84;
           registerSeat({
@@ -153,9 +148,9 @@ export function buildPolideportivoModel(eventType = 'basketball') {
             rowIdx: r,
             seatNum: c + 1,
             x: side.axis === 'x' ? offset : Math.sign(side.x) * dist,
-            y: 0.04 + r * 0.12,
+            y: 0.04 + r * 0.24,
             z: side.axis === 'z' ? offset : Math.sign(side.z) * dist,
-            yaw: side.yaw,
+            sectionYaw: side.yaw,
             baseColor: '#f59e0b',
             isVip: true
           });
@@ -164,27 +159,24 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     });
   }
 
-  // =========================================================================
-  // 2. NIVEL 1: ANILLO INFERIOR (PLATEA NORTE, SUR, ESTE, OESTE + ESQUINAS)
-  // =========================================================================
+  // 2. NIVEL 1: ANILLO INFERIOR (Platea Norte, Sur, Este y Oeste)
   const lowerRows = 12;
-  const lowerTread = 0.82;
-  const lowerRise = 0.38;
-  const lowerStartY = 0.45;
+  const lowerTread = 0.85;
+  const lowerRise = 0.45;
+  const lowerStartY = 0.55;
 
-  // Secciones Norte y Sur (5 bloques cada lado)
   const longSections = [
-    { code: '101', label: 'Esquina Nor-Oeste', xStart: -19.5, xEnd: -12.2 },
-    { code: '102', label: 'Platea Norte Izq.', xStart: -11.4, xEnd: -4.1 },
-    { code: '103', label: 'Platea Norte Central', xStart: -3.3, xEnd: 3.3 },
-    { code: '104', label: 'Platea Norte Der.', xStart: 4.1, xEnd: 11.4 },
-    { code: '105', label: 'Esquina Nor-Este', xStart: 12.2, xEnd: 19.5 }
+    { code: '101', xStart: -19.5, xEnd: -12.2 },
+    { code: '102', xStart: -11.4, xEnd: -4.1 },
+    { code: '103', xStart: -3.3, xEnd: 3.3 },
+    { code: '104', xStart: 4.1, xEnd: 11.4 },
+    { code: '105', xStart: 12.2, xEnd: 19.5 }
   ];
 
   longSections.forEach((sec, idx) => {
     const secWidth = sec.xEnd - sec.xStart;
     const centerX = (sec.xStart + sec.xEnd) / 2;
-    const cols = Math.floor(secWidth / 0.56);
+    const cols = Math.floor(secWidth / 0.58);
 
     // Norte (-Z)
     for (let r = 0; r < lowerRows; r++) {
@@ -192,20 +184,16 @@ export function buildPolideportivoModel(eventType = 'basketball') {
       const y = lowerStartY + r * lowerRise;
       tierBlocks.push({
         x: centerX,
-        y: y / 2,
+        y: Math.max(0.18, y - 0.22),
         z,
         w: secWidth + 0.35,
-        h: y,
-        d: lowerTread + 0.04,
-        color: '#1e293b'
+        h: 0.4,
+        d: lowerTread + 0.04
       });
 
       for (let c = 0; c < cols; c++) {
-        // Hueco de vomitorio en filas 3..6 de las secciones pares
-        if ((idx === 1 || idx === 3) && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.6) {
-          continue;
-        }
-        const x = sec.xStart + 0.32 + c * ((secWidth - 0.64) / Math.max(1, cols - 1));
+        if ((idx === 1 || idx === 3) && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.6) continue;
+        const x = sec.xStart + 0.34 + c * ((secWidth - 0.68) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `PN-${sec.code}`,
           sectorName: `Platea Norte • Sec. ${sec.code}`,
@@ -216,7 +204,7 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: 0,
+          sectionYaw: 0,
           baseColor: '#2563eb'
         });
       }
@@ -233,19 +221,16 @@ export function buildPolideportivoModel(eventType = 'basketball') {
       const y = lowerStartY + r * lowerRise;
       tierBlocks.push({
         x: centerX,
-        y: y / 2,
+        y: Math.max(0.18, y - 0.22),
         z,
         w: secWidth + 0.35,
-        h: y,
-        d: lowerTread + 0.04,
-        color: '#1e293b'
+        h: 0.4,
+        d: lowerTread + 0.04
       });
 
       for (let c = 0; c < cols; c++) {
-        if ((idx === 1 || idx === 3) && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.6) {
-          continue;
-        }
-        const x = sec.xStart + 0.32 + c * ((secWidth - 0.64) / Math.max(1, cols - 1));
+        if ((idx === 1 || idx === 3) && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.6) continue;
+        const x = sec.xStart + 0.34 + c * ((secWidth - 0.68) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `PS-${southCode}`,
           sectorName: `Platea Sur • Sec. ${southCode}`,
@@ -256,7 +241,7 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: Math.PI,
+          sectionYaw: Math.PI,
           baseColor: '#2563eb'
         });
       }
@@ -267,36 +252,34 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     }
   });
 
-  // Cabeceras Inferiores Este (+X) y Oeste (-X) (3 bloques cada cabecera)
+  // Cabeceras Inferiores Este (+X) y Oeste (-X)
   const endSections = [
-    { offsetCode: 0, label: 'Izq.', zStart: -10.8, zEnd: -4.0 },
-    { offsetCode: 1, label: 'Central', zStart: -3.2, zEnd: 3.2 },
-    { offsetCode: 2, label: 'Der.', zStart: 4.0, zEnd: 10.8 }
+    { offsetCode: 0, zStart: -10.8, zEnd: -4.0 },
+    { offsetCode: 1, zStart: -3.2, zEnd: 3.2 },
+    { offsetCode: 2, zStart: 4.0, zEnd: 10.8 }
   ];
 
   endSections.forEach((sec, idx) => {
     const secDepth = sec.zEnd - sec.zStart;
     const centerZ = (sec.zStart + sec.zEnd) / 2;
-    const cols = Math.floor(secDepth / 0.56);
+    const cols = Math.floor(secDepth / 0.58);
 
-    // Este (+X)
     const eastCode = String(111 + idx);
     for (let r = 0; r < lowerRows; r++) {
       const x = 19.6 + r * lowerTread;
       const y = lowerStartY + r * lowerRise;
       tierBlocks.push({
         x,
-        y: y / 2,
+        y: Math.max(0.18, y - 0.22),
         z: centerZ,
         w: lowerTread + 0.04,
-        h: y,
-        d: secDepth + 0.35,
-        color: '#1e293b'
+        h: 0.4,
+        d: secDepth + 0.35
       });
 
       for (let c = 0; c < cols; c++) {
         if (idx === 1 && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.5) continue;
-        const z = sec.zStart + 0.32 + c * ((secDepth - 0.64) / Math.max(1, cols - 1));
+        const z = sec.zStart + 0.34 + c * ((secDepth - 0.68) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `PE-${eastCode}`,
           sectorName: `Platea Este • Sec. ${eastCode}`,
@@ -307,7 +290,7 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: -Math.PI / 2,
+          sectionYaw: -Math.PI / 2,
           baseColor: '#1d4ed8'
         });
       }
@@ -316,24 +299,22 @@ export function buildPolideportivoModel(eventType = 'basketball') {
       vomitories.push({ x: 19.6 + 3.5 * lowerTread, y: lowerStartY + 2.5 * lowerRise, z: 0, rotY: -Math.PI / 2 });
     }
 
-    // Oeste (-X)
     const westCode = String(114 + idx);
     for (let r = 0; r < lowerRows; r++) {
       const x = -(19.6 + r * lowerTread);
       const y = lowerStartY + r * lowerRise;
       tierBlocks.push({
         x,
-        y: y / 2,
+        y: Math.max(0.18, y - 0.22),
         z: centerZ,
         w: lowerTread + 0.04,
-        h: y,
-        d: secDepth + 0.35,
-        color: '#1e293b'
+        h: 0.4,
+        d: secDepth + 0.35
       });
 
       for (let c = 0; c < cols; c++) {
         if (idx === 1 && r >= 2 && r <= 5 && Math.abs(c - cols / 2) < 1.5) continue;
-        const z = sec.zStart + 0.32 + c * ((secDepth - 0.64) / Math.max(1, cols - 1));
+        const z = sec.zStart + 0.34 + c * ((secDepth - 0.68) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `PO-${westCode}`,
           sectorName: `Platea Oeste • Sec. ${westCode}`,
@@ -344,7 +325,7 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: Math.PI / 2,
+          sectionYaw: Math.PI / 2,
           baseColor: '#1d4ed8'
         });
       }
@@ -354,12 +335,14 @@ export function buildPolideportivoModel(eventType = 'basketball') {
     }
   });
 
-  // =========================================================================
-  // 3. NIVEL INTERMEDIO: PALCOS VIP / PRENSA (Sobre cinturón LED Norte y Sur)
-  // =========================================================================
+  // 3. NIVEL INTERMEDIO: PALCOS VIP / PRENSA (Con losa de balcón propia)
+  tierBlocks.push(
+    { x: 0, y: 6.72, z: -23.6, w: 38, h: 0.36, d: 2.1 },
+    { x: 0, y: 6.72, z: 23.6, w: 38, h: 0.36, d: 2.1 }
+  );
+
   const palcoCols = 52;
   for (let c = 0; c < palcoCols; c++) {
-    // Dejar pasillos entre módulos de palcos
     if (c % 13 === 6) continue;
     const x = -17.5 + (c / (palcoCols - 1)) * 35;
 
@@ -371,9 +354,9 @@ export function buildPolideportivoModel(eventType = 'basketball') {
       rowIdx: 0,
       seatNum: c + 1,
       x,
-      y: 6.15,
+      y: 6.92,
       z: -23.6,
-      yaw: 0,
+      sectionYaw: 0,
       baseColor: '#6366f1',
       isVip: true
     });
@@ -386,21 +369,19 @@ export function buildPolideportivoModel(eventType = 'basketball') {
       rowIdx: 0,
       seatNum: c + 1,
       x,
-      y: 6.15,
+      y: 6.92,
       z: 23.6,
-      yaw: Math.PI,
+      sectionYaw: Math.PI,
       baseColor: '#6366f1',
       isVip: true
     });
   }
 
-  // =========================================================================
   // 4. NIVEL 2: ANILLO SUPERIOR (GRADERÍA ALTA PERIMETRAL)
-  // =========================================================================
   const upperRows = 14;
-  const upperTread = 0.84;
-  const upperRise = 0.54;
-  const upperStartY = 7.35;
+  const upperTread = 0.86;
+  const upperRise = 0.58;
+  const upperStartY = 8.45;
 
   const upperLongSections = [
     { code: '201', xStart: -24.5, xEnd: -15.4 },
@@ -413,25 +394,24 @@ export function buildPolideportivoModel(eventType = 'basketball') {
   upperLongSections.forEach((sec, idx) => {
     const secWidth = sec.xEnd - sec.xStart;
     const centerX = (sec.xStart + sec.xEnd) / 2;
-    const cols = Math.floor(secWidth / 0.55);
+    const cols = Math.floor(secWidth / 0.57);
 
-    // Gradería Alta Norte (-Z)
+    // Norte (-Z)
     for (let r = 0; r < upperRows; r++) {
-      const z = -(25.2 + r * upperTread);
+      const z = -(25.6 + r * upperTread);
       const y = upperStartY + r * upperRise;
       tierBlocks.push({
         x: centerX,
-        y: upperStartY - 0.35 + (r * upperRise) / 2,
+        y: y - 0.22,
         z,
         w: secWidth + 0.4,
-        h: 0.7 + r * upperRise,
-        d: upperTread + 0.04,
-        color: '#0f172a'
+        h: 0.4,
+        d: upperTread + 0.04
       });
 
       for (let c = 0; c < cols; c++) {
         if ((idx === 1 || idx === 3) && r >= 1 && r <= 4 && Math.abs(c - cols / 2) < 1.5) continue;
-        const x = sec.xStart + 0.3 + c * ((secWidth - 0.6) / Math.max(1, cols - 1));
+        const x = sec.xStart + 0.32 + c * ((secWidth - 0.64) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `GN-${sec.code}`,
           sectorName: `Grada Alta Norte • Sec. ${sec.code}`,
@@ -442,30 +422,29 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: 0,
+          sectionYaw: 0,
           baseColor: '#3b82f6'
         });
       }
     }
 
-    // Gradería Alta Sur (+Z)
+    // Sur (+Z)
     const southCode = String(206 + idx);
     for (let r = 0; r < upperRows; r++) {
-      const z = 25.2 + r * upperTread;
+      const z = 25.6 + r * upperTread;
       const y = upperStartY + r * upperRise;
       tierBlocks.push({
         x: centerX,
-        y: upperStartY - 0.35 + (r * upperRise) / 2,
+        y: y - 0.22,
         z,
         w: secWidth + 0.4,
-        h: 0.7 + r * upperRise,
-        d: upperTread + 0.04,
-        color: '#0f172a'
+        h: 0.4,
+        d: upperTread + 0.04
       });
 
       for (let c = 0; c < cols; c++) {
         if ((idx === 1 || idx === 3) && r >= 1 && r <= 4 && Math.abs(c - cols / 2) < 1.5) continue;
-        const x = sec.xStart + 0.3 + c * ((secWidth - 0.6) / Math.max(1, cols - 1));
+        const x = sec.xStart + 0.32 + c * ((secWidth - 0.64) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `GS-${southCode}`,
           sectorName: `Grada Alta Sur • Sec. ${southCode}`,
@@ -476,14 +455,14 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: Math.PI,
+          sectionYaw: Math.PI,
           baseColor: '#3b82f6'
         });
       }
     }
   });
 
-  // Graderías Altas Cabeceras Este (+X) y Oeste (-X)
+  // Cabeceras Altas Este (+X) y Oeste (-X)
   const upperEndSections = [
     { offsetCode: 0, zStart: -22.5, zEnd: -11.8 },
     { offsetCode: 1, zStart: -10.8, zEnd: -0.6 },
@@ -494,25 +473,23 @@ export function buildPolideportivoModel(eventType = 'basketball') {
   upperEndSections.forEach((sec) => {
     const secDepth = sec.zEnd - sec.zStart;
     const centerZ = (sec.zStart + sec.zEnd) / 2;
-    const cols = Math.floor(secDepth / 0.56);
+    const cols = Math.floor(secDepth / 0.58);
 
-    // Este (+X)
     const eastCode = String(211 + sec.offsetCode);
     for (let r = 0; r < 12; r++) {
-      const x = 31.2 + r * upperTread;
+      const x = 31.6 + r * upperTread;
       const y = upperStartY + r * upperRise;
       tierBlocks.push({
         x,
-        y: upperStartY - 0.35 + (r * upperRise) / 2,
+        y: y - 0.22,
         z: centerZ,
         w: upperTread + 0.04,
-        h: 0.7 + r * upperRise,
-        d: secDepth + 0.4,
-        color: '#0f172a'
+        h: 0.4,
+        d: secDepth + 0.4
       });
 
       for (let c = 0; c < cols; c++) {
-        const z = sec.zStart + 0.3 + c * ((secDepth - 0.6) / Math.max(1, cols - 1));
+        const z = sec.zStart + 0.32 + c * ((secDepth - 0.64) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `GE-${eastCode}`,
           sectorName: `Grada Alta Este • Sec. ${eastCode}`,
@@ -523,29 +500,27 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: -Math.PI / 2,
+          sectionYaw: -Math.PI / 2,
           baseColor: '#2563eb'
         });
       }
     }
 
-    // Oeste (-X)
     const westCode = String(215 + sec.offsetCode);
     for (let r = 0; r < 12; r++) {
-      const x = -(31.2 + r * upperTread);
+      const x = -(31.6 + r * upperTread);
       const y = upperStartY + r * upperRise;
       tierBlocks.push({
         x,
-        y: upperStartY - 0.35 + (r * upperRise) / 2,
+        y: y - 0.22,
         z: centerZ,
         w: upperTread + 0.04,
-        h: 0.7 + r * upperRise,
-        d: secDepth + 0.4,
-        color: '#0f172a'
+        h: 0.4,
+        d: secDepth + 0.4
       });
 
       for (let c = 0; c < cols; c++) {
-        const z = sec.zStart + 0.3 + c * ((secDepth - 0.6) / Math.max(1, cols - 1));
+        const z = sec.zStart + 0.32 + c * ((secDepth - 0.64) / Math.max(1, cols - 1));
         registerSeat({
           sectorId: `GO-${westCode}`,
           sectorName: `Grada Alta Oeste • Sec. ${westCode}`,
@@ -556,14 +531,13 @@ export function buildPolideportivoModel(eventType = 'basketball') {
           x,
           y,
           z,
-          yaw: Math.PI / 2,
+          sectionYaw: Math.PI / 2,
           baseColor: '#2563eb'
         });
       }
     }
   });
 
-  // Agrupar sectores únicos para filtros e inspección
   const sectorsMap = new Map();
   for (const s of seats) {
     if (!sectorsMap.has(s.sectorId)) {
